@@ -1,9 +1,7 @@
-// functions/img/[[path]].ts
 import { CONFIG } from "../api/_config";
 
 export async function onRequest({ params }: any) {
   try {
-    // Cloudflare Pages 的 [[path]] 返回的是字符串(可能为空)，包含余下所有路径
     const rawPath = (params?.path ?? "") as string;
     if (!rawPath) return new Response("无效的图片路径", { status: 400 });
 
@@ -12,7 +10,6 @@ export async function onRequest({ params }: any) {
     if (!domainMatch) return new Response("无效的图片路径", { status: 400 });
 
     const domain = domainMatch[1];
-
     const allowed = CONFIG.ALLOWED_HOSTS.some((host) => domain.endsWith(host));
     if (!allowed) return new Response("不允许的图片来源", { status: 403 });
 
@@ -31,7 +28,7 @@ export async function onRequest({ params }: any) {
     headers.delete("Set-Cookie");
 
     return new Response(resp.body, { status: resp.status, headers });
-  } catch (err) {
+  } catch {
     return new Response("图片代理失败", { status: 502 });
   }
 }

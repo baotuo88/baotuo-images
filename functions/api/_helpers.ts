@@ -1,4 +1,3 @@
-// functions/api/_helpers.ts
 import { CONFIG } from "./_config";
 
 export function jsonResponse(data: unknown, status = 200) {
