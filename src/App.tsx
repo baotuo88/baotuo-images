@@ -1,53 +1,69 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Header from "./components/Header";
 import Toolbar from "./components/Toolbar";
 import WallCard from "./components/WallCard";
 import { api } from "./api";
 
+// 解析 "2560x1440" -> {w:2560,h:1440}
+function parseRes(res?: string) {
+  if (!res) return null;
+  const m = res.match(/^(\d+)\s*x\s*(\d+)$/i);
+  if (!m) return null;
+  return { w: parseInt(m[1], 10), h: parseInt(m[2], 10) };
+}
+
 export default function App() {
-  // === 状态 ===
+  const PAGE_SIZE = 24;
+
   const [cats, setCats] = useState<any[]>([]);
   const [cid, setCid] = useState<number | null>(null);
   const [items, setItems] = useState<any[]>([]);
   const [page, setPage] = useState(0);
+  const [hasNext, setHasNext] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [resolution, setResolution] = useState("1920x1080");
-  const sentinel = useRef<HTMLDivElement | null>(null);
+  const [mobileOnly, setMobileOnly] = useState(false); // 竖屏筛选
 
-  // === 加载分类 ===
+  // 分类
   useEffect(() => {
     let canceled = false;
     api
       .categories()
-      .then((res) => {
-        if (!canceled) setCats(res.data || []);
-      })
-      .catch(() => {
-        if (!canceled) setCats([]);
-      });
+      .then((res) => !canceled && setCats(res.data || []))
+      .catch(() => !canceled && setCats([]));
     return () => {
       canceled = true;
     };
   }, []);
 
-  // === 初次或切换分类时重置 ===
+  // 切换分类或开关竖屏 -> 回到第一页
   useEffect(() => {
-    setItems([]);
     setPage(0);
-  }, [cid]);
+  }, [cid, mobileOnly]);
 
-  // === 加载数据（最新或按分类）===
+  // 加载数据（分页+可选竖屏过滤）
   useEffect(() => {
     let canceled = false;
     async function load() {
       setLoading(true);
       try {
-        const start = page * 24;
+        const start = page * PAGE_SIZE;
         const res =
           cid === null
-            ? await api.latest(start, 24)
-            : await api.byCid(cid, start, 24);
-        if (!canceled) setItems((prev) => [...prev, ...(res.data || [])]);
+            ? await api.latest(start, PAGE_SIZE)
+            : await api.byCid(cid, start, PAGE_SIZE);
+
+        let data = res.data || [];
+
+        // 前端“手机壁纸”分类：仅展示竖屏（高>宽）
+        if (mobileOnly) {
+          data = data.filter((it: any) => {
+            const p = parseRes(it.resolution);
+            return p ? p.h > p.w : false;
+          });
+        }
+
+        setItems(data);
+        setHasNext((res.data || []).length >= PAGE_SIZE); // 判断是否还有下一页（以原始返回长度）
       } finally {
         if (!canceled) setLoading(false);
       }
@@ -56,55 +72,70 @@ export default function App() {
     return () => {
       canceled = true;
     };
-  }, [cid, page]);
+    // 注意：依赖 page/cid/mobileOnly
+  }, [page, cid, mobileOnly]);
 
-  // === 无限滚动 ===
-  useEffect(() => {
-    const el = sentinel.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((e) => {
-          if (e.isIntersecting) setPage((p) => p + 1);
-        });
-      },
-      { rootMargin: "1000px" }
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
-
-  // 只显示热门分类按钮（也可以直接用全部）
   const hot = useMemo(() => cats.filter((c) => c.is_hot), [cats]);
 
-  // === 渲染 ===
+  function prevPage() {
+    setPage((p) => Math.max(0, p - 1));
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function nextPage() {
+    if (!hasNext) return;
+    setPage((p) => p + 1);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-black to-zinc-900 text-white">
       <Header />
+
       <Toolbar
         categories={hot}
         activeCid={cid}
         onChangeCid={setCid}
-        resolution={resolution}
-        setResolution={setResolution}
+        mobileOnly={mobileOnly}
+        setMobileOnly={setMobileOnly}
       />
 
       <main className="mx-auto max-w-7xl px-4 py-6">
-        {items.length === 0 && loading && (
+        {loading && items.length === 0 && (
           <div className="text-center text-white/70">加载中...</div>
         )}
 
         <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
           {items.map((it) => (
-            <WallCard key={it.id} item={it} resolution={resolution} />
+            <WallCard key={it.id} item={it} />
           ))}
         </div>
 
-        <div ref={sentinel} className="h-10" />
-
-        {loading && (
-          <div className="text-center py-6 text-white/60">加载更多...</div>
-        )}
+        {/* 分页器 */}
+        <div className="mt-8 flex items-center justify-center gap-3">
+          <button
+            onClick={prevPage}
+            disabled={page === 0 || loading}
+            className={`px-4 py-2 rounded-full border ${
+              page === 0 || loading
+                ? "text-white/40 border-white/20 cursor-not-allowed"
+                : "text-white border-white/30 hover:bg-white/10"
+            }`}
+          >
+            上一页
+          </button>
+          <span className="text-white/60 text-sm">第 {page + 1} 页</span>
+          <button
+            onClick={nextPage}
+            disabled={!hasNext || loading}
+            className={`px-4 py-2 rounded-full border ${
+              !hasNext || loading
+                ? "text-white/40 border-white/20 cursor-not-allowed"
+                : "text-white border-white/30 hover:bg-white/10"
+            }`}
+          >
+            下一页
+          </button>
+        </div>
       </main>
     </div>
   );
