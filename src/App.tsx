@@ -14,14 +14,19 @@ function parseRes(res?: string) {
 
 export default function App() {
   const PAGE_SIZE = 24;
+  const MOBILE_POOL_FETCH = 200; // 开启“手机壁纸”时一次性抓取量
 
   const [cats, setCats] = useState<any[]>([]);
   const [cid, setCid] = useState<number | null>(null);
-  const [items, setItems] = useState<any[]>([]);
+
+  const [items, setItems] = useState<any[]>([]);  // 当前页展示的条目
   const [page, setPage] = useState(0);
   const [hasNext, setHasNext] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [mobileOnly, setMobileOnly] = useState(false); // 竖屏筛选
+
+  const [mobileOnly, setMobileOnly] = useState(false); // 竖屏筛选（手机壁纸）
+  const [mobilePool, setMobilePool] = useState<any[]>([]); // 手机壁纸模式下的本地池
+  const [mobileTotalPages, setMobileTotalPages] = useState(0);
 
   // 分类
   useEffect(() => {
@@ -35,15 +40,18 @@ export default function App() {
     };
   }, []);
 
-  // 切换分类或开关竖屏 -> 回到第一页
+  // 切换分类或开关“手机壁纸” -> 回到第一页，并重算池
   useEffect(() => {
     setPage(0);
+    setMobilePool([]);
+    setMobileTotalPages(0);
   }, [cid, mobileOnly]);
 
-  // 加载数据（分页+可选竖屏过滤）
+  // 加载数据
   useEffect(() => {
     let canceled = false;
-    async function load() {
+
+    async function loadNormal() {
       setLoading(true);
       try {
         const start = page * PAGE_SIZE;
@@ -51,29 +59,54 @@ export default function App() {
           cid === null
             ? await api.latest(start, PAGE_SIZE)
             : await api.byCid(cid, start, PAGE_SIZE);
-
-        let data = res.data || [];
-
-        // 前端“手机壁纸”分类：仅展示竖屏（高>宽）
-        if (mobileOnly) {
-          data = data.filter((it: any) => {
-            const p = parseRes(it.resolution);
-            return p ? p.h > p.w : false;
-          });
-        }
-
+        const data = res.data || [];
         setItems(data);
-        setHasNext((res.data || []).length >= PAGE_SIZE); // 判断是否还有下一页（以原始返回长度）
+        setHasNext(data.length >= PAGE_SIZE);
       } finally {
         if (!canceled) setLoading(false);
       }
     }
-    load();
+
+    async function loadMobilePoolAndSlice() {
+      setLoading(true);
+      try {
+        // 只在第一次或切换分类/开关时拉取一次大池
+        let pool = mobilePool;
+        if (pool.length === 0) {
+          const res =
+            cid === null
+              ? await api.latest(0, MOBILE_POOL_FETCH)
+              : await api.byCid(cid, 0, MOBILE_POOL_FETCH);
+          const raw = res.data || [];
+          // 过滤竖屏（高>宽）
+          pool = raw.filter((it: any) => {
+            const p = parseRes(it.resolution);
+            return p ? p.h > p.w : false;
+          });
+          setMobilePool(pool);
+          setMobileTotalPages(Math.max(1, Math.ceil(pool.length / PAGE_SIZE)));
+        }
+
+        // 本地分页切片
+        const start = page * PAGE_SIZE;
+        const pageItems = pool.slice(start, start + PAGE_SIZE);
+        setItems(pageItems);
+        setHasNext(start + PAGE_SIZE < pool.length);
+      } finally {
+        if (!canceled) setLoading(false);
+      }
+    }
+
+    if (mobileOnly) {
+      loadMobilePoolAndSlice();
+    } else {
+      loadNormal();
+    }
+
     return () => {
       canceled = true;
     };
-    // 注意：依赖 page/cid/mobileOnly
-  }, [page, cid, mobileOnly]);
+  }, [page, cid, mobileOnly]); // 依赖三者
 
   const hot = useMemo(() => cats.filter((c) => c.is_hot), [cats]);
 
@@ -86,6 +119,11 @@ export default function App() {
     setPage((p) => p + 1);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
+
+  const currentPageDisplay = mobileOnly
+    ? Math.min(page + 1, Math.max(1, mobileTotalPages))
+    : page + 1;
+  const totalPagesDisplay = mobileOnly ? Math.max(1, mobileTotalPages) : undefined;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-black to-zinc-900 text-white">
@@ -123,7 +161,10 @@ export default function App() {
           >
             上一页
           </button>
-          <span className="text-white/60 text-sm">第 {page + 1} 页</span>
+          <span className="text-white/60 text-sm">
+            第 {currentPageDisplay}
+            {totalPagesDisplay ? ` / ${totalPagesDisplay}` : ""} 页
+          </span>
           <button
             onClick={nextPage}
             disabled={!hasNext || loading}
@@ -136,6 +177,13 @@ export default function App() {
             下一页
           </button>
         </div>
+
+        {/* 手机壁纸模式且没有数据时的提示 */}
+        {mobileOnly && !loading && items.length === 0 && (
+          <div className="text-center text-white/60 mt-4">
+            这一页没有竖屏图片，试试切换分类或点击下一页～
+          </div>
+        )}
       </main>
     </div>
   );
