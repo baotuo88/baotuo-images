@@ -1,22 +1,13 @@
 type Props = {
-  categories: { id: number; name: string; is_hot: boolean }[];
-  activeCid: number | null;
-  onChangeCid: (cid: number | null) => void;
-  mobileOnly: boolean;
-  setMobileOnly: (v: boolean) => void;
+  categories: { id: string | number; name: string; is_hot?: boolean }[];
+  activeCid: string | number | null;
+  onChangeCid: (cid: any) => void;
 };
 
-export default function Toolbar({
-  categories,
-  activeCid,
-  onChangeCid,
-  mobileOnly,
-  setMobileOnly,
-}: Props) {
+export default function Toolbar({ categories, activeCid, onChangeCid }: Props) {
   return (
-    <div className="bg-black/60 border-b border-white/10">
-      <div className="mx-auto max-w-7xl px-4 py-3 flex flex-wrap gap-3 items-center">
-        {/* 热门 */}
+    <div className="bg-black/60 border border-white/10 rounded-2xl p-3 mb-6">
+      <div className="flex flex-wrap gap-2 items-center">
         <button
           className={`px-3 py-1.5 rounded-full text-sm border ${
             activeCid === null
@@ -27,39 +18,20 @@ export default function Toolbar({
         >
           热门
         </button>
-
-        {/* 分类按钮 */}
-        <div className="flex gap-2 overflow-x-auto no-scrollbar">
-          {categories.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => onChangeCid(c.id)}
-              className={`px-3 py-1.5 rounded-full text-sm border ${
-                activeCid === c.id
-                  ? "bg-white text-black"
-                  : "text-white border-white/30 hover:bg-white/10"
-              }`}
-            >
-              {c.name}
-              {c.is_hot && <span className="ml-1 text-xs text-yellow-300">★</span>}
-            </button>
-          ))}
-        </div>
-
-        {/* 手机壁纸开关（竖屏筛选） */}
-        <div className="ml-auto flex items-center gap-2">
+        {categories.map((c) => (
           <button
-            onClick={() => setMobileOnly(!mobileOnly)}
+            key={c.id}
+            onClick={() => onChangeCid(c.id)}
             className={`px-3 py-1.5 rounded-full text-sm border ${
-              mobileOnly
+              activeCid === c.id
                 ? "bg-white text-black"
                 : "text-white border-white/30 hover:bg-white/10"
             }`}
-            title="仅显示竖屏（高>宽）的图片"
           >
-            手机壁纸
+            {c.name}
+            {c.is_hot ? <span className="ml-1 text-xs text-yellow-300">★</span> : null}
           </button>
-        </div>
+        ))}
       </div>
     </div>
   );
