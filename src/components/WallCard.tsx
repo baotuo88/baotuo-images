@@ -1,6 +1,5 @@
 import type { Wallpaper } from "../types";
 
-// 需要通过 /img 代理的域名（会在代理层自动补 Referer/Origin）
 const PROXY_HOSTS = ["qhimg.com", "360img.cn", "360cdn.com", "adesk.com"];
 
 function shouldProxy(raw: string) {
@@ -13,42 +12,32 @@ function shouldProxy(raw: string) {
 }
 function toProxyPath(httpsUrl: string) {
   const url = (httpsUrl || "").replace(/^https?:\/\//, "");
-  return `/img/${url}`;
+  return `/img/${url}`; // querystring 会被保留在前端路径上，后端会拼回去
 }
 const pick = (...xs: Array<string | undefined>) => xs.find(Boolean) || "";
 
-/**
- * 展示策略：
- * - 360/adesk 等在 PROXY_HOSTS 里：走代理；展示优先中图，其次原图；下载/查看用原图
- * - 其他域名：直接用原图（不少源缩略/中图会防外链）
- * - 失败兜底：img onError 自动切换成原图（同样按域名决定是否走代理）
- */
 export default function WallCard({ item }: { item: Wallpaper }) {
   const rawFull = pick(item.url, item.url_mid, item.url_thumb);
-  const rawMid  = pick(item.url_mid, item.url, item.url_thumb);
+  const rawMid = pick(item.url_mid, item.url, item.url_thumb);
 
-  // 是否应走代理（按域名判断）
   const proxyFull = shouldProxy(rawFull);
-  const proxyMid  = shouldProxy(rawMid);
+  const proxyMid = shouldProxy(rawMid);
 
-  // 选择用于 <img> 的展示地址：
-  //  - 需要代理：优先中图，其次原图
-  //  - 不需要代理：优先原图，其次中图
+  // 展示优先：代理域 → 中图，其它域 → 原图
   const displayRaw = proxyMid || proxyFull ? rawMid : rawFull;
 
-  const imgSrc   = (proxyMid || (proxyFull && displayRaw === rawFull))
-    ? toProxyPath(displayRaw)
-    : displayRaw;
+  const imgSrc =
+    proxyMid || (proxyFull && displayRaw === rawFull)
+      ? toProxyPath(displayRaw)
+      : displayRaw;
 
-  // 查看/下载永远指向原图
   const fullHref = proxyFull ? toProxyPath(rawFull) : rawFull;
 
-  // 失败兜底：加载失败时切换到原图（再失败就不再处理）
   const handleError: React.ReactEventHandler<HTMLImageElement> = (e) => {
     const el = e.currentTarget;
     if (el.dataset.fallbackApplied === "1") return;
     el.dataset.fallbackApplied = "1";
-    el.src = fullHref;
+    el.src = fullHref; // 兜底：直接切到原图
   };
 
   return (

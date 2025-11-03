@@ -3,13 +3,20 @@ import { CONFIG } from "../api/_config";
 
 /**
  * 通用图片代理：
- * - 允许 360 源域（来自 CONFIG.ALLOWED_HOSTS）
- * - 允许 A·Desk 源域（*.adesk.com），并自动加 Referer/Origin
- * - 透传图片响应，补充 CORS/缓存头，去掉干扰安全头
+ * - 允许 360 源（来自 CONFIG.ALLOWED_HOSTS）
+ * - 允许手机源 *.adesk.com，并自动补 Referer/Origin
+ * - 保留 querystring，跟随重定向
+ * - 统一 CORS & 缓存头
  */
-export async function onRequest({ params }: { params: { path?: string | string[] } }) {
+export async function onRequest({
+  request,
+  params,
+}: {
+  request: Request;
+  params: { path?: string | string[] };
+}) {
   try {
-    // 1) 解析路径：/img/<host>/<path...>
+    // 1) 解析 /img/<host>/<path...>?<query>
     const pathParam = params?.path;
     if (!pathParam) return new Response("无效的图片路径", { status: 400 });
 
@@ -19,51 +26,45 @@ export async function onRequest({ params }: { params: { path?: string | string[]
 
     const domain = domainMatch[1].toLowerCase();
 
-    // 2) 白名单域：原有 360 + 追加手机源 adesk.com
+    // 2) 白名单：360 + adesk
     const EXTRA_ALLOWED = ["adesk.com"];
-    const isAllowed =
+    const allowed =
       CONFIG.ALLOWED_HOSTS.some((h: string) => domain.endsWith(h)) ||
       EXTRA_ALLOWED.some((h) => domain.endsWith(h));
+    if (!allowed) return new Response("不允许的图片来源", { status: 403 });
 
-    if (!isAllowed) {
-      return new Response("不允许的图片来源", { status: 403 });
-    }
+    // 3) 还原目标 URL（强制 https + 保留原始 query）
+    const inUrl = new URL(request.url);
+    const target = `https://${imagePath}${inUrl.search || ""}`;
 
-    // 3) 目标 URL（强制 https）
-    const targetUrl = `https://${imagePath}`;
-
-    // 4) 构造转发请求头
-    const reqHeaders: HeadersInit = {
-      // 某些 CDN 对 UA 敏感
+    // 4) 构造请求头
+    const fwdHeaders: HeadersInit = {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
-      "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
       "Accept-Language": "zh-CN,zh;q=0.9",
       "Cache-Control": "no-cache",
-      "Pragma": "no-cache",
+      Pragma: "no-cache",
     };
 
-    // ✅ 针对 A·Desk 源补齐 Referer/Origin，避免防盗链
+    // 5) A·Desk 需要 Referer/Origin
     if (domain.endsWith("adesk.com")) {
-      (reqHeaders as any)["Referer"] = "https://service.picasso.adesk.com/";
-      (reqHeaders as any)["Origin"]  = "https://service.picasso.adesk.com";
+      (fwdHeaders as any).Referer = "https://service.picasso.adesk.com/";
+      (fwdHeaders as any).Origin = "https://service.picasso.adesk.com";
     }
 
-    // 5) 发起转发请求
-    const upstream = await fetch(targetUrl, { headers: reqHeaders, redirect: "follow" });
+    // 6) 发起请求（跟随 30x）
+    const upstream = await fetch(target, { headers: fwdHeaders, redirect: "follow" });
     if (!upstream.ok) {
       return new Response(`图片获取失败: ${upstream.status}`, { status: 502 });
     }
 
-    // 6) 类型校验（部分源返回 octet-stream 也允许透传）
+    // 7) 类型校验：部分源会返回 octet-stream，也放行
     const ct = upstream.headers.get("Content-Type") || "";
-    const isImage =
-      ct.startsWith("image/") || ct === "" || ct === "application/octet-stream";
-    if (!isImage) {
-      return new Response("不支持的资源类型", { status: 415 });
-    }
+    const isImage = ct.startsWith("image/") || ct === "" || ct === "application/octet-stream";
+    if (!isImage) return new Response("不支持的资源类型", { status: 415 });
 
-    // 7) 透传响应体，统一附加 CORS/缓存头，移除可能干扰的安全头
+    // 8) 透传响应体 + 统一头
     const out = new Headers(upstream.headers);
     out.set("Access-Control-Allow-Origin", "*");
     out.set("Cache-Control", "public, max-age=86400");
