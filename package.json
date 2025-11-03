@@ -10,9 +10,10 @@
     "dev:pages": "vite build --watch & wrangler pages dev dist --persist --live-reload"
   },
   "dependencies": {
+    "autoprefixer": "^10.4.19",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "autoprefixer": "^10.4.19"
+    "react-router-dom": "^7.9.5"
   },
   "devDependencies": {
     "@types/react": "^18.3.5",
